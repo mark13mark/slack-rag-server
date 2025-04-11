@@ -1,12 +1,11 @@
 {
-  "name": "doc-bot",
+  "name": "slack-rag-server",
   "version": "1.0.0",
-  "description": "Server for Slackbot communication to RAG server",
-  "main": "bolt.js",
+  "description": "Slack bot for RAG (Retrieval Augmented Generation)",
+  "main": "src/app.js",
   "type": "module",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "node --env-file=.env bolt.js"
+    "start": "node src/app.js"
   },
   "author": "",
   "license": "ISC",

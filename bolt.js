@@ -146,54 +146,83 @@ function sendSlackMessage({say, thread_ts, text}) {
   }
 }
 
+// Helper function to handle traceback flag
+function handleTracebackFlag(text) {
+  const words = text.trim().split(/\s+/);
+  const includeTraceback = words[0] === '--traceback';
+  const inputText = includeTraceback ? words.slice(1).join(' ') : text;
+  return { includeTraceback, inputText };
+}
+
+// Helper function for error handling
+async function handleError({ error, client, channel, timestamp, say, logger, messageId = null }) {
+  logger.error(`Error: ${error}`);
+  addReaction({client, channel, timestamp, name: 'x', logger});
+  sendSlackMessage({
+    say,
+    thread_ts: timestamp,
+    text: `Error: ${error}${messageId ? `, message_id: ${messageId}` : ''}`
+  });
+}
+
+// Helper function for processing messages
+async function processMessage({ message, client, say, logger, text, thread = null }) {
+  // Add thinking reaction
+  addReaction({
+    client,
+    channel: message.channel,
+    timestamp: message.ts,
+    name: 'thinking_face',
+    logger
+  });
+
+  // Check for traceback flag
+  const { includeTraceback, inputText } = handleTracebackFlag(text);
+
+  // Retrieve any file attachments
+  const fileAttachments = await attachmentHandler({message, logger});
+
+  // Get response from Bedrock with any attachments
+  await sendAgentRequest({
+    logger,
+    say,
+    client,
+    channel: message.channel,
+    timestamp: message.ts,
+    thread,
+    inputText,
+    attachments: fileAttachments,
+    includeTraceback
+  });
+}
+
 // Handle app mentions
 app.event('app_mention', async ({ event, client, say, logger }) => {
   try {
     logger.info(`Processing app mention: ${event.text}`);
 
-    // Add thinking reaction
-    addReaction({
-      client,
-      channel: event.channel,
-      timestamp: event.ts,
-      name: 'thinking_face',
-      logger
-    });
-
-    // Extract text without the mention and check for traceback flag
+    // Extract text without the mention
     const mentionPattern = /<@[^>]+>/;
     const mentionMatch = event.text.match(mentionPattern);
     const textAfterMention = event.text.slice(mentionMatch.index + mentionMatch[0].length).trim();
 
-    // Check if the first word after mention is --traceback
-    const words = textAfterMention.split(/\s+/);
-    const includeTraceback = words[0] === '--traceback';
-
-    // Remove the flag if present and get the actual input text
-    const inputText = includeTraceback ? words.slice(1).join(' ') : textAfterMention;
-
-    // Retrieve any file attachments
-    const fileAttachments = await attachmentHandler({message: event, logger});
-
-    // Process the regular request
-    await sendAgentRequest({
+    await processMessage({
+      message: event,
+      client,
+      say,
+      logger,
+      text: textAfterMention,
+      thread: event.thread_ts || null
+    });
+  } catch (error) {
+    await handleError({
+      error,
       client,
       channel: event.channel,
       timestamp: event.ts,
-      thread: event.thread_ts || null,
-      inputText,
       say,
       logger,
-      attachments: fileAttachments,
-      includeTraceback
-    });
-  } catch (error) {
-    logger.error(`Error handling app mention: ${error}`);
-    addReaction({client, channel: event.channel, timestamp: event.ts, name: 'x', logger});
-    sendSlackMessage({
-      say,
-      thread_ts: event.ts,
-      text: `Error handling app mention: ${error}${event.client_msg_id ? `, message_id: ${event.client_msg_id}` : ''}`
+      messageId: event.client_msg_id
     });
   }
 });
@@ -214,42 +243,23 @@ app.message(async ({ message, client, say, logger }) => {
 
     logger.info(`Processing direct message: ${message.text}`);
 
-    // Add thinking reaction
-    addReaction({
+    await processMessage({
+      message,
       client,
-      channel: message.channel,
-      timestamp: message.ts,
-      name: 'thinking_face',
-      logger
-    });
-
-    // Check for traceback flag
-    const words = message.text.trim().split(/\s+/);
-    const includeTraceback = words[0] === '--traceback';
-    const inputText = includeTraceback ? words.slice(1).join(' ') : message.text;
-
-    // Retrieve any file attachments
-    const fileAttachments = await attachmentHandler({message, logger});
-
-    // Get response from Bedrock with any attachments
-    await sendAgentRequest({
-      logger,
       say,
-      client,
-      channel: message.channel,
-      timestamp: message.ts,
-      thread: message.thread_ts || null,
-      inputText,
-      attachments: fileAttachments,
-      includeTraceback
+      logger,
+      text: message.text,
+      thread: message.thread_ts || null
     });
   } catch (error) {
-    logger.error(`Error handling direct message: ${error}`);
-    addReaction({client, channel: message.channel, timestamp: message.ts, name: 'x', logger});
-    sendSlackMessage({
+    await handleError({
+      error,
+      client,
+      channel: message.channel,
+      timestamp: message.ts,
       say,
-      thread_ts: message.ts,
-      text: `Error handling direct message: ${error}${message.client_msg_id ? `, message_id: ${message.client_msg_id}` : ''}`
+      logger,
+      messageId: message.client_msg_id
     });
   }
 });
@@ -268,43 +278,26 @@ app.message(async ({ message, client, say, logger }) => {
 
     logger.info(`Processing thread message: ${message.text}`);
 
-    // Add thinking reaction
-    addReaction({
-      client,
-      channel: message.channel,
-      timestamp: message.ts,
-      name: 'thinking_face',
-      logger
-    });
-
-    // Extract text after "Hey Docbot" and check for traceback flag
+    // Extract text after "Hey Docbot"
     const textAfterHeyDocbot = message.text.slice(message.text.toLowerCase().indexOf("hey docbot") + "hey docbot".length).trim();
-    const words = textAfterHeyDocbot.split(/\s+/);
-    const includeTraceback = words[0] === '--traceback';
-    const inputText = includeTraceback ? words.slice(1).join(' ') : textAfterHeyDocbot;
 
-    // Retrieve any file attachments
-    const fileAttachments = await attachmentHandler({message, logger});
-
-    // Get response from Bedrock with any attachments
-    await sendAgentRequest({
-      logger,
-      say,
+    await processMessage({
+      message,
       client,
-      channel: message.channel,
-      timestamp: message.ts,
-      thread: message.thread_ts || null,
-      inputText,
-      attachments: fileAttachments,
-      includeTraceback
+      say,
+      logger,
+      text: textAfterHeyDocbot,
+      thread: message.thread_ts
     });
   } catch (error) {
-    logger.error(`Error handling thread message: ${error}`);
-    addReaction({client, channel: message.channel, timestamp: message.ts, name: 'x', logger});
-    sendSlackMessage({
+    await handleError({
+      error,
+      client,
+      channel: message.channel,
+      timestamp: message.ts,
       say,
-      thread_ts: message.ts,
-      text: `Error handling thread message: ${error}${message.client_msg_id ? `, message_id: ${message.client_msg_id}` : ''}`
+      logger,
+      messageId: message.client_msg_id
     });
   }
 });
