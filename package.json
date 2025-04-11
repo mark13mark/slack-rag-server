@@ -1,0 +1,22 @@
+{
+  "name": "doc-bot",
+  "version": "1.0.0",
+  "description": "Server for Slackbot communication to RAG server",
+  "main": "bolt.js",
+  "type": "module",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node --env-file=.env bolt.js"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@aws-sdk/client-bedrock-agent": "^3.765.0",
+    "@aws-sdk/client-bedrock-agent-runtime": "^3.758.0",
+    "@slack/bolt": "^4.2.1",
+    "body-parser": "^1.20.3",
+    "chalk": "^5.4.1",
+    "express": "^4.21.2",
+    "slackify-markdown": "^4.4.0"
+  }
+}

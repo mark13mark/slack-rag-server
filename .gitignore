@@ -1,0 +1,17 @@
+# Environment variables and secrets
+.env
+
+# Node.js
+node_modules/
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# macOS specific files
+.DS_Store
