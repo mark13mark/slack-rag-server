@@ -1,7 +1,6 @@
 import { BedrockAgentRuntimeClient, InvokeAgentCommand } from '@aws-sdk/client-bedrock-agent-runtime';
-import { BedrockAgentClient, ListIngestionJobsCommand, StartIngestionJobCommand, GetKnowledgeBaseCommand, GetDataSourceCommand, GetAgentCommand, ListDataSourcesCommand, GetIngestionJobCommand, GetAgentTraceCommand } from "@aws-sdk/client-bedrock-agent";
+import { BedrockAgentClient, ListIngestionJobsCommand, StartIngestionJobCommand, GetKnowledgeBaseCommand, GetDataSourceCommand, GetAgentCommand, ListDataSourcesCommand, GetIngestionJobCommand } from "@aws-sdk/client-bedrock-agent";
 
-import chalk from 'chalk'; // Add this package for colored logging
 /*
 Purpose and Operations:
 
@@ -44,21 +43,13 @@ function formatTraceback(traceback) {
     });
   }
 
-  // Add timing information if available
-  if (traceback.createdAt) {
-    formattedOutput += `\n⏱️ Trace started at: ${new Date(traceback.createdAt).toLocaleString()}\n`;
-  }
-  if (traceback.updatedAt) {
-    formattedOutput += `⏱️ Last updated at: ${new Date(traceback.updatedAt).toLocaleString()}\n`;
-  }
-
   formattedOutput += "```";
   return formattedOutput;
 }
 
 // Invoke the Bedrock agent with the provided input text
 async function invokeBedrockAgent({inputText, sessionId, attachments = [], includeTraceback = false}) {
-  console.log(chalk.magenta(`Session Sample ID: ${sessionId}`));
+  console.log(`Session Sample ID: ${sessionId}`);
   try {
     // Create AWS SDK client with credentials and region
     const client = new BedrockAgentRuntimeClient({
@@ -379,33 +370,3 @@ export {
   listDataSources,
   getIngestionJobStatus
 };
-
-/**
- * Retrieves the traceback of an agent's logic for a specific session
- * @param {string} sessionId - The session ID to get the traceback for
- * @returns {Promise<Object>} The agent's traceback information including steps, decisions, and responses
- */
-async function getAgentTraceback(sessionId) {
-  const client = new BedrockAgentClient({ region: process.env.AWS_BEDROCK_REGION });
-
-  try {
-    const command = new GetAgentTraceCommand({
-      agentId: process.env.AWS_BEDROCK_AGENT_ID,
-      sessionId: sessionId
-    });
-
-    const response = await client.send(command);
-    return {
-      traceId: response.traceId,
-      sessionId: response.sessionId,
-      steps: response.steps,
-      createdAt: response.createdAt,
-      updatedAt: response.updatedAt
-    };
-  } catch (error) {
-    console.error("Error fetching agent traceback:", error);
-    throw error;
-  }
-}
-
-export { getAgentTraceback };

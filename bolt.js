@@ -3,22 +3,7 @@ import fs from 'fs/promises';
 import path from 'path';
 const { App, ExpressReceiver, LogLevel } = pkg;
 import express from 'express';
-import { invokeBedrockAgent, getDataSourceMetadata, syncDataSource } from './bedrock.js';
-import chalk from 'chalk'; // Add this package for colored logging
-
-// Create a colored logger
-const createColoredLogger = (logger) => {
-  return {
-    info: (message) => logger.info(chalk.green(message)),
-    warn: (message) => logger.warn(chalk.yellow(message)),
-    error: (message) => logger.error(chalk.red(message)),
-    debug: (message) => logger.debug(chalk.blue(message)),
-    // Custom log types
-    mention: (message) => logger.info(chalk.magenta(`[MENTION] ${message}`)),
-    dm: (message) => logger.info(chalk.cyan(`[DM] ${message}`)),
-    thread: (message) => logger.info(chalk.yellow(`[THREAD] ${message}`))
-  };
-};
+import { invokeBedrockAgent, getDataSourceMetadata, syncDataSource, getKnowledgeBaseStatus, getDataSourceConfig, getAgentStatus, listDataSources, getIngestionJobStatus } from './bedrock.js';
 
 // Helper function to determine file type based on extension
 function getFileType(fileName) {
@@ -107,7 +92,7 @@ async function attachmentHandler({message, logger}) {
   return attachments;
 }
 
-async function sendAgentRequest({client, channel, timestamp, inputText, say, attachments, thread, logger}) {
+async function sendAgentRequest({client, channel, timestamp, inputText, say, attachments, thread, logger, includeTraceback = false}) {
   const hasAttachments = attachments && attachments.length > 0;
 
   try {
@@ -116,6 +101,7 @@ async function sendAgentRequest({client, channel, timestamp, inputText, say, att
       inputText: `${inputText}${hasAttachments ? ' use these files when generating your answer' : ''}`,
       attachments: hasAttachments ? attachments : null,
       sessionId: thread || timestamp,
+      includeTraceback
     });
 
     // Post the response in thread
@@ -162,10 +148,8 @@ function sendSlackMessage({say, thread_ts, text}) {
 
 // Handle app mentions
 app.event('app_mention', async ({ event, client, say, logger }) => {
-  const log = createColoredLogger(logger);
-
   try {
-    log.mention(`Processing app mention: ${event.text}`);
+    logger.info(`Processing app mention: ${event.text}`);
 
     // Add thinking reaction
     addReaction({
@@ -173,16 +157,25 @@ app.event('app_mention', async ({ event, client, say, logger }) => {
       channel: event.channel,
       timestamp: event.ts,
       name: 'thinking_face',
-      logger: log
+      logger
     });
 
-    // Extract text without the mention
-    const inputText = event.text.replace(/<@[^>]+>/g, '').trim();
+    // Extract text without the mention and check for traceback flag
+    const mentionPattern = /<@[^>]+>/;
+    const mentionMatch = event.text.match(mentionPattern);
+    const textAfterMention = event.text.slice(mentionMatch.index + mentionMatch[0].length).trim();
+
+    // Check if the first word after mention is --traceback
+    const words = textAfterMention.split(/\s+/);
+    const includeTraceback = words[0] === '--traceback';
+
+    // Remove the flag if present and get the actual input text
+    const inputText = includeTraceback ? words.slice(1).join(' ') : textAfterMention;
 
     // Retrieve any file attachments
-    const fileAttachments = await attachmentHandler({message: event, logger: log});
+    const fileAttachments = await attachmentHandler({message: event, logger});
 
-    // Start processing the request to send to the Bedrock Agent
+    // Process the regular request
     await sendAgentRequest({
       client,
       channel: event.channel,
@@ -190,12 +183,13 @@ app.event('app_mention', async ({ event, client, say, logger }) => {
       thread: event.thread_ts || null,
       inputText,
       say,
-      logger: log,
-      attachments: fileAttachments
+      logger,
+      attachments: fileAttachments,
+      includeTraceback
     });
   } catch (error) {
-    log.error(`Error handling app mention: ${error}`);
-    addReaction({client, channel: event.channel, timestamp: event.ts, name: 'x', logger: log});
+    logger.error(`Error handling app mention: ${error}`);
+    addReaction({client, channel: event.channel, timestamp: event.ts, name: 'x', logger});
     sendSlackMessage({
       say,
       thread_ts: event.ts,
@@ -206,8 +200,6 @@ app.event('app_mention', async ({ event, client, say, logger }) => {
 
 // Handle direct messages
 app.message(async ({ message, client, say, logger }) => {
-  const log = createColoredLogger(logger);
-
   try {
     // Handles case if message is a direct message or a thread in a direct message
     const isDM = message.channel_type === 'im';
@@ -220,7 +212,7 @@ app.message(async ({ message, client, say, logger }) => {
       return;
     }
 
-    log.dm(`Processing direct message: ${message.text}`);
+    logger.info(`Processing direct message: ${message.text}`);
 
     // Add thinking reaction
     addReaction({
@@ -228,26 +220,32 @@ app.message(async ({ message, client, say, logger }) => {
       channel: message.channel,
       timestamp: message.ts,
       name: 'thinking_face',
-      logger: log
+      logger
     });
 
+    // Check for traceback flag
+    const words = message.text.trim().split(/\s+/);
+    const includeTraceback = words[0] === '--traceback';
+    const inputText = includeTraceback ? words.slice(1).join(' ') : message.text;
+
     // Retrieve any file attachments
-    const fileAttachments = await attachmentHandler({message, logger: log});
+    const fileAttachments = await attachmentHandler({message, logger});
 
     // Get response from Bedrock with any attachments
     await sendAgentRequest({
-      logger: log,
+      logger,
       say,
       client,
       channel: message.channel,
       timestamp: message.ts,
       thread: message.thread_ts || null,
-      inputText: message.text,
-      attachments: fileAttachments
+      inputText,
+      attachments: fileAttachments,
+      includeTraceback
     });
   } catch (error) {
-    log.error(`Error handling direct message: ${error}`);
-    addReaction({client, channel: message.channel, timestamp: message.ts, name: 'x', logger: log});
+    logger.error(`Error handling direct message: ${error}`);
+    addReaction({client, channel: message.channel, timestamp: message.ts, name: 'x', logger});
     sendSlackMessage({
       say,
       thread_ts: message.ts,
@@ -258,8 +256,6 @@ app.message(async ({ message, client, say, logger }) => {
 
 // Handle thread messages with "Hey Docbot" in channels (not DMs)
 app.message(async ({ message, client, say, logger }) => {
-  const log = createColoredLogger(logger);
-
   try {
     if (!message.thread_ts ||
       message.channel_type === 'im' ||
@@ -270,7 +266,7 @@ app.message(async ({ message, client, say, logger }) => {
       return;
     }
 
-    log.thread(`Processing thread message with "Hey Docbot": ${message.text}`);
+    logger.info(`Processing thread message: ${message.text}`);
 
     // Add thinking reaction
     addReaction({
@@ -278,29 +274,33 @@ app.message(async ({ message, client, say, logger }) => {
       channel: message.channel,
       timestamp: message.ts,
       name: 'thinking_face',
-      logger: log
+      logger
     });
 
-    // Extract text without the "Hey Docbot" prefix
-    const inputText = message.text.replace(/^hey\s*docbot/i, '').trim();
+    // Extract text after "Hey Docbot" and check for traceback flag
+    const textAfterHeyDocbot = message.text.slice(message.text.toLowerCase().indexOf("hey docbot") + "hey docbot".length).trim();
+    const words = textAfterHeyDocbot.split(/\s+/);
+    const includeTraceback = words[0] === '--traceback';
+    const inputText = includeTraceback ? words.slice(1).join(' ') : textAfterHeyDocbot;
 
     // Retrieve any file attachments
-    const fileAttachments = await attachmentHandler({message, logger: log});
+    const fileAttachments = await attachmentHandler({message, logger});
 
-    // Get response from Bedrock
+    // Get response from Bedrock with any attachments
     await sendAgentRequest({
-      logger: log,
+      logger,
       say,
       client,
       channel: message.channel,
       timestamp: message.ts,
       thread: message.thread_ts || null,
       inputText,
-      attachments: fileAttachments
+      attachments: fileAttachments,
+      includeTraceback
     });
   } catch (error) {
-    log.error(`Error handling thread message: ${error}`);
-    addReaction({client, channel: message.channel, timestamp: message.ts, name: 'x', logger: log});
+    logger.error(`Error handling thread message: ${error}`);
+    addReaction({client, channel: message.channel, timestamp: message.ts, name: 'x', logger});
     sendSlackMessage({
       say,
       thread_ts: message.ts,
@@ -311,15 +311,14 @@ app.message(async ({ message, client, say, logger }) => {
 
 // Slash command for data source info
 app.command('/docbot-get-datasource', async ({ command, ack, respond, logger }) => {
-  const log = createColoredLogger(logger);
   await ack();
 
   try {
-    log.info(`Processing get-datasource command from ${command.user_id}`);
+    logger.info(`Processing get-datasource command from ${command.user_id}`);
     const responseData = await getDataSourceMetadata();
     await respond(responseData);
   } catch (error) {
-    log.error(`Error handling get-datasource command: ${error}`);
+    logger.error(`Error handling get-datasource command: ${error}`);
     await respond({
       text: 'Error retrieving data source information',
       response_type: 'ephemeral'
@@ -329,11 +328,10 @@ app.command('/docbot-get-datasource', async ({ command, ack, respond, logger }) 
 
 // Slash command to sync data source
 app.command('/docbot-sync-datasource', async ({ command, ack, respond, logger }) => {
-  const log = createColoredLogger(logger);
   await ack();
 
   try {
-    log.info(`Processing sync-datasource command from ${command.user_id}`);
+    logger.info(`Processing sync-datasource command from ${command.user_id}`);
 
     await respond({
       text: 'Starting knowledge base sync...',
@@ -347,7 +345,7 @@ app.command('/docbot-sync-datasource', async ({ command, ack, respond, logger })
       response_type: 'in_channel'
     });
   } catch (error) {
-    log.error(`Error handling sync-datasource command: ${error}`);
+    logger.error(`Error handling sync-datasource command: ${error}`);
     await respond({
       text: 'Error syncing knowledge base',
       response_type: 'ephemeral'
@@ -357,7 +355,6 @@ app.command('/docbot-sync-datasource', async ({ command, ack, respond, logger })
 
 // Slash command for usage text
 app.command('/docbot-help', async ({ command, ack, respond, logger }) => {
-  const log = createColoredLogger(logger);
   await ack();
 
   try {
@@ -379,9 +376,118 @@ app.command('/docbot-help', async ({ command, ack, respond, logger }) => {
       ]
     });
   } catch (error) {
-    log.error(`Error handling /docbot-help command: ${error}`);
+    logger.error(`Error handling /docbot-help command: ${error}`);
     await respond({
       text: "Sorry, I couldn't load the help documentation. Please try again later.",
+      response_type: 'ephemeral'
+    });
+  }
+});
+
+// Slash command for knowledge base status
+app.command('/docbot-kb-status', async ({ command, ack, respond, logger }) => {
+  await ack();
+
+  try {
+    logger.info(`Processing kb-status command from ${command.user_id}`);
+    const status = await getKnowledgeBaseStatus();
+    await respond({
+      text: `Knowledge Base Status:\n${JSON.stringify(status, null, 2)}`,
+      response_type: 'ephemeral'
+    });
+  } catch (error) {
+    logger.error(`Error handling kb-status command: ${error}`);
+    await respond({
+      text: 'Error retrieving knowledge base status',
+      response_type: 'ephemeral'
+    });
+  }
+});
+
+// Slash command for data source configuration
+app.command('/docbot-ds-config', async ({ command, ack, respond, logger }) => {
+  await ack();
+
+  try {
+    logger.info(`Processing ds-config command from ${command.user_id}`);
+    const config = await getDataSourceConfig();
+    await respond({
+      text: `Data Source Configuration:\n${JSON.stringify(config, null, 2)}`,
+      response_type: 'ephemeral'
+    });
+  } catch (error) {
+    logger.error(`Error handling ds-config command: ${error}`);
+    await respond({
+      text: 'Error retrieving data source configuration',
+      response_type: 'ephemeral'
+    });
+  }
+});
+
+// Slash command for agent status
+app.command('/docbot-agent-status', async ({ command, ack, respond, logger }) => {
+  await ack();
+
+  try {
+    logger.info(`Processing agent-status command from ${command.user_id}`);
+    const status = await getAgentStatus();
+    await respond({
+      text: `Agent Status:\n${JSON.stringify(status, null, 2)}`,
+      response_type: 'ephemeral'
+    });
+  } catch (error) {
+    logger.error(`Error handling agent-status command: ${error}`);
+    await respond({
+      text: 'Error retrieving agent status',
+      response_type: 'ephemeral'
+    });
+  }
+});
+
+// Slash command to list data sources
+app.command('/docbot-list-datasources', async ({ command, ack, respond, logger }) => {
+  await ack();
+
+  try {
+    logger.info(`Processing list-datasources command from ${command.user_id}`);
+    const dataSources = await listDataSources();
+    await respond({
+      text: `Available Data Sources:\n${JSON.stringify(dataSources, null, 2)}`,
+      response_type: 'ephemeral'
+    });
+  } catch (error) {
+    logger.error(`Error handling list-datasources command: ${error}`);
+    await respond({
+      text: 'Error listing data sources',
+      response_type: 'ephemeral'
+    });
+  }
+});
+
+// Slash command to check ingestion job status
+app.command('/docbot-job-status', async ({ command, ack, respond, logger }) => {
+  await ack();
+
+  try {
+    logger.info(`Processing job-status command from ${command.user_id}`);
+    const jobId = command.text.trim();
+    if (!jobId) {
+      await respond({
+        text: 'Please provide a job ID. Usage: /docbot-job-status <job_id>',
+        response_type: 'ephemeral'
+      });
+      return;
+    }
+
+    const status = await getIngestionJobStatus(jobId);
+    await respond({
+      text: `Ingestion Job Status:\n${JSON.stringify(status, null, 2)}`,
+      response_type: 'ephemeral'
+    });
+  } catch (error) {
+    logger.error(`Error handling job-status command: ${error}`);
+    await respond({
+      text: 'Error retrieving ingestion job status',
       response_type: 'ephemeral'
     });
   }
@@ -400,7 +506,7 @@ expressApp.get('/', (req, res) => {
 (async () => {
   const port = process.env.PORT || 8081;
   await app.start(port);
-  console.log(chalk.green(`⚡️ Slack bot is running on port ${port}`));
+  console.log(`⚡️ Slack bot is running on port ${port}`);
 })();
 
 export default app;
