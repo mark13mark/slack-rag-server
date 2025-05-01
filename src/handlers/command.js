@@ -6,25 +6,38 @@ import {
   getDataSourceConfig,
   getAgentStatus,
   listDataSources,
-  getIngestionJobStatus
+  getIngestionJobStatus,
+  checkBedrockAgentHealth
 } from '../services/bedrock.js';
+import { formatDate } from '../utils/date.js';
 
 // Handle /ragbot-get-datasource command
 export async function handleGetDataSource({ command, ack, respond, logger }) {
-  try {
-    await ack();
-    logInfo(logger, `Processing /ragbot-get-datasource command`);
+  await ack();
+  logInfo(logger, `Processing /ragbot-get-datasource command`);
 
-    const response = await getDataSource();
+  const response = await getDataSource();
+
+  // Check if response contains an error
+  if (response && response.error) {
+    logError(logger, response.originalError || response.error, 'Error in /ragbot-get-datasource');
     await respond({
-      text: response
+      text: `Error getting data source information: ${response.error}`
     });
-  } catch (error) {
-    logError(logger, error, 'Error in /ragbot-get-datasource');
-    await respond({
-      text: `Error getting data source information: ${error}`
-    });
+    return;
   }
+
+  let formattedResponse;
+
+  if (response.status === "NO_JOBS_FOUND") {
+    formattedResponse = response.message;
+  } else {
+    formattedResponse = `Data Source: ${response.dataSourceId}\nKnowledge Base: ${response.knowledgeBaseId}\nMessage: ${response.description}\nStatus: ${response.status}\nLast sync: ${formatDate(response.updatedAt)}`;
+  }
+
+  await respond({
+    text: `DATA SOURCE INFORMATION:\n\n${formattedResponse}`
+  });
 }
 
 // Handle /ragbot-sync-datasource command
@@ -48,8 +61,10 @@ export async function handleSyncDataSource({ command, ack, respond, client, logg
     // }
 
     const response = await syncDataSource();
+    const formattedResponse = `Data Source: ${response.dataSourceId}\nKnowledge Base: ${response.knowledgeBaseId}\nJob ID: ${response.ingestionJobId}\nStatus: ${response.status}`;
+
     await respond({
-      text: response
+      text: `DATA SOURCE SYNC INITIATED:\n\n${formattedResponse}`
     });
   } catch (error) {
     logError(logger, error, 'Error in /ragbot-sync-datasource');
@@ -73,7 +88,8 @@ export async function handleHelp({ command, ack, respond, logger }) {
     /ragbot-ds-config - Get configuration for the data source
     /ragbot-get-datasource - Get information about the current data source
     /ragbot-agent-status - Check the status of the agent
-    /ragbot-job-status <job_id> - Check the status of an ingestion job`;
+    /ragbot-job-status <job_id> - Check the status of an ingestion job
+    /ragbot-health-check - Check overall health of the Bedrock agent service`;
 
     await respond({
       text: helpText
@@ -92,9 +108,11 @@ export async function handleKbStatus({ command, ack, respond, logger }) {
     await ack();
     logInfo(logger, `Processing /ragbot-kb-status command`);
 
-    const response  = await getKnowledgeBaseStatus();
+    const response = await getKnowledgeBaseStatus();
+    const formattedResponse = `Knowledge Base: ${response.name}\nStatus: ${response.status}\nCreated At: ${formatDate(response.createdAt)}\nUpdated At: ${formatDate(response.updatedAt)}`;
+
     await respond({
-      text: `Knowledge Base Status:\n${response}`
+      text: `KNOWLEDGE BASE STATUS:\n\n${formattedResponse}`
     });
   } catch (error) {
     logError(logger, error, 'Error in /ragbot-kb-status');
@@ -111,8 +129,10 @@ export async function handleDsConfig({ command, ack, respond, logger }) {
     logInfo(logger, `Processing /ragbot-ds-config command`);
 
     const response = await getDataSourceConfig();
+    const formattedResponse = `Data Source: ${response.name}\nStatus: ${response.status}\nConfiguration: Type: ${response.configurationType}\nCreated At: ${formatDate(response.createdAt)}\nUpdated At: ${formatDate(response.updatedAt)}`;
+
     await respond({
-      text: `Data Source Configuration:\n${response}`
+      text: `DATA SOURCE CONFIGURATION:\n\n${formattedResponse}`
     });
   } catch (error) {
     logError(logger, error, 'Error in /ragbot-ds-config');
@@ -124,20 +144,25 @@ export async function handleDsConfig({ command, ack, respond, logger }) {
 
 // Handle /ragbot-agent-status command
 export async function handleAgentStatus({ command, ack, respond, logger }) {
-  try {
-    await ack();
-    logInfo(logger, `Processing /ragbot-agent-status command`);
+  await ack();
+  logInfo(logger, `Processing /ragbot-agent-status command`);
 
-    const response = await getAgentStatus();
+  const response = await getAgentStatus();
+
+  // Check if response contains an error
+  if (response && response.error) {
+    logError(logger, response.originalError || response.error, 'Error in /ragbot-agent-status');
     await respond({
-      text: `Agent Status:\n${response}`
+      text: `Error getting agent status: ${response.error}`
     });
-  } catch (error) {
-    logError(logger, error, 'Error in /ragbot-agent-status');
-    await respond({
-      text: `Error getting agent status: ${error}`
-    });
+    return;
   }
+
+  const formattedResponse = `Agent Name: ${response.agentName}\nAgent ID: ${response.agentId}\nStatus: ${response.agentStatus}\nFoundation Model: ${response.foundationModel}\nCreated At: ${formatDate(response.createdAt)}\nUpdated At: ${formatDate(response.updatedAt)}`;
+
+  await respond({
+    text: `AGENT INFORMATION:\n\n${formattedResponse}`
+  });
 }
 
 // Handle /ragbot-list-datasources command
@@ -147,8 +172,12 @@ export async function handleListDataSources({ command, ack, respond, logger }) {
     logInfo(logger, `Processing /ragbot-list-datasources command`);
 
     const response = await listDataSources();
+    const formattedResponse = response.dataSources.map(source =>
+      `Data Source: ${source.dataSourceId}\n Name: ${source.name}\n Status: ${source.status}\n Updated At: ${formatDate(source.updatedAt)}\n`
+    ).join('\n');
+
     await respond({
-      text: `Available Data Sources:\n${response}`
+      text: `AVAILABLE DATA SOURCES:\n\n${formattedResponse}`
     });
   } catch (error) {
     logError(logger, error, 'Error in /ragbot-list-datasources');
@@ -173,8 +202,11 @@ export async function handleJobStatus({ command, ack, respond, logger }) {
     }
 
     const response = await getIngestionJobStatus(jobId);
+    const failureText = response.failureReasons.length > 0 ? response.failureReasons.join('\n') : 'None';
+    const formattedResponse = `Ingestion Job: ${response.ingestionJobId}\nStatus: ${response.status}\nStarted At: ${formatDate(response.startedAt)}\nUpdated At: ${formatDate(response.updatedAt)}\nStatistics: ${response.statistics}\nFailure Reasons: ${failureText}`;
+
     await respond({
-      text: `Job Status:\n${response}`
+      text: `INGESTION JOB STATUS:\n\n${formattedResponse}`
     });
   } catch (error) {
     logError(logger, error, 'Error in /ragbot-job-status');
@@ -182,4 +214,33 @@ export async function handleJobStatus({ command, ack, respond, logger }) {
       text: `Error getting job status: ${error}`
     });
   }
+}
+
+// Handle /ragbot-health-check command
+export async function handleHealthCheck({ command, ack, respond, logger }) {
+  await ack();
+  logInfo(logger, `Processing /ragbot-health-check command`);
+
+  const healthStatus = await checkBedrockAgentHealth();
+
+  // Check if response contains an error
+  if (healthStatus && healthStatus.error) {
+    logError(logger, healthStatus.originalError || healthStatus.error, 'Error in /ragbot-health-check');
+    await respond({
+      text: `Error checking health status: ${healthStatus.error}`
+    });
+    return;
+  }
+
+  let responseText;
+  if (healthStatus.healthy) {
+    responseText = `✅ Ragbot is healthy and ready to use.\n\nAgent: ${healthStatus.details.agentName}\nRegion: ${healthStatus.details.region}`;
+  } else {
+    const issues = healthStatus.issues.map(issue => `• ${issue.component}: ${issue.message}`).join('\n');
+    responseText = `❌ Ragbot has issues:\n\n${issues}`;
+  }
+
+  await respond({
+    text: responseText
+  });
 }

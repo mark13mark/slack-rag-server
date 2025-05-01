@@ -1,12 +1,5 @@
 import { BedrockAgentRuntimeClient, InvokeAgentCommand } from '@aws-sdk/client-bedrock-agent-runtime';
 import { BedrockAgentClient, ListIngestionJobsCommand, StartIngestionJobCommand, GetKnowledgeBaseCommand, GetDataSourceCommand, GetAgentCommand, ListDataSourcesCommand, GetIngestionJobCommand } from "@aws-sdk/client-bedrock-agent";
-import { formatDate } from '../utils/date.js';
-/*
-Purpose and Operations:
-
-BedrockAgentClient: Used for management operations like creating, updating, deleting, and configuring agents and knowledge bases. This includes operations like CreateAgent, DeleteKnowledgeBase, GetKnowledgeBase, etc.
-BedrockAgentRuntimeClient: Used for runtime interactions with existing agents and knowledge bases. This includes operations like InvokeAgent, Retrieve, RetrieveAndGenerate, etc.
-*/
 
 // Formats the traceback information in a Slack-friendly way
 function formatTraceback(traceback) {
@@ -43,9 +36,92 @@ function formatTraceback(traceback) {
   return formattedOutput;
 }
 
+// Check if the AWS Bedrock agent service is healthy and ready to use
+async function checkBedrockAgentHealth() {
+  const issues = [];
+  const details = {
+    region: process.env.AWS_BEDROCK_REGION,
+    agentId: process.env.AWS_BEDROCK_AGENT_ID,
+    agentAliasId: process.env.AWS_BEDROCK_AGENT_ALIAS_ID
+  };
+
+  try {
+    // Check agent status using existing function
+    try {
+      const agentStatus = await getAgentStatus();
+
+      details.agentName = agentStatus.agentName;
+
+      if (agentStatus.agentStatus !== 'PREPARED' && agentStatus.agentStatus !== 'READY') {
+        issues.push({
+          component: 'Agent',
+          status: agentStatus.agentStatus,
+          message: `Agent is not in a ready state. Current status: ${agentStatus.agentStatus}`
+        });
+      }
+    } catch (agentError) {
+      console.error('Error checking agent status:', agentError);
+      issues.push({
+        component: 'Agent',
+        status: 'ERROR',
+        message: `Failed to check Agent status: ${agentError.message}`
+      });
+    }
+
+    // Check knowledge base status if configured
+    if (process.env.AWS_BEDROCK_KNOWLEDGE_BASE_ID) {
+      try {
+        const kbStatus = await getKnowledgeBaseStatus();
+
+        details.knowledgeBaseName = kbStatus.name;
+
+        if (kbStatus.status !== 'ACTIVE') {
+          issues.push({
+            component: 'Knowledge Base',
+            status: kbStatus.status,
+            message: `Knowledge Base is not active. Current status: ${kbStatus.status}`
+          });
+        }
+      } catch (kbError) {
+        console.error('Error checking knowledge base status:', kbError);
+        issues.push({
+          component: 'Knowledge Base',
+          status: 'ERROR',
+          message: `Failed to check Knowledge Base status: ${kbError.message}`
+        });
+      }
+    }
+
+    // Return final health status
+    return {
+      healthy: issues.length === 0,
+      issues,
+      details
+    };
+  } catch (error) {
+    console.error('Error checking Bedrock agent health:', error);
+    return {
+      healthy: false,
+      issues: [{
+        component: 'Bedrock Service',
+        status: 'ERROR',
+        message: `Failed to check Bedrock service health: ${error.message}`
+      }]
+    };
+  }
+}
+
 // Invoke the Bedrock agent with the provided input text
 async function invokeBedrockAgent({inputText, sessionId, attachments = [], includeTraceback = false}) {
   console.log(`Session Sample ID: ${sessionId}`);
+
+  // Check agent health before attempting to invoke
+  const healthStatus = await checkBedrockAgentHealth();
+  if (!healthStatus.healthy) {
+    const issues = healthStatus.issues.map(issue => `${issue.component}: ${issue.message}`).join('\n');
+    return { error: `AWS Bedrock agent service is not healthy: \n${issues}` };
+  }
+
   try {
     // Create AWS SDK client with credentials and region
     const client = new BedrockAgentRuntimeClient({
@@ -113,7 +189,7 @@ async function invokeBedrockAgent({inputText, sessionId, attachments = [], inclu
 
   } catch (error) {
     console.error('Error invoking Bedrock agent:', error);
-    throw error;
+    return { error: error.message, originalError: error };
   }
 }
 
@@ -128,11 +204,18 @@ async function getKnowledgeBaseStatus() {
 
     const response = await client.send(command);
     console.log("Knowledge base response:", response);
-    const formattedResponse = `Knowledge Base: ${response.knowledgeBase.name}\nStatus: ${response.knowledgeBase.status}\nCreated At: ${formatDate(response.knowledgeBase.createdAt)}\nUpdated At: ${formatDate(response.knowledgeBase.updatedAt)}`;
-    return formattedResponse;
+
+    return {
+      name: response.knowledgeBase.name,
+      status: response.knowledgeBase.status,
+      createdAt: response.knowledgeBase.createdAt,
+      updatedAt: response.knowledgeBase.updatedAt,
+      id: response.knowledgeBase.knowledgeBaseId,
+      rawResponse: response.knowledgeBase
+    };
   } catch (error) {
     console.error("Error fetching knowledge base status:", error);
-    throw error;
+    return { error: error.message, originalError: error };
   }
 }
 
@@ -147,21 +230,27 @@ async function getAgentStatus() {
 
     const response = await client.send(command);
     console.log("Agent response:", response);
-    const formattedResponse = `Agent Name: ${response.agent.agentName}\nAgent ID: ${response.agent.agentId}\nStatus: ${response.agent.agentStatus}\nFoundation Model: ${response.agent.foundationModel}\nCreated At: ${formatDate(response.agent.createdAt)}\nUpdated At: ${formatDate(response.agent.updatedAt)}`;
-    return formattedResponse;
+
+    return {
+      agentName: response.agent.agentName,
+      agentId: response.agent.agentId,
+      agentStatus: response.agent.agentStatus,
+      foundationModel: response.agent.foundationModel,
+      createdAt: response.agent.createdAt,
+      updatedAt: response.agent.updatedAt,
+      rawResponse: response.agent
+    };
   } catch (error) {
     console.error("Error fetching agent status:", error);
-    throw error;
+    return { error: error.message, originalError: error };
   }
 }
-
 
 // Retrieves the metadata for the data source
 async function getDataSource() {
   const client = new BedrockAgentClient({ region: process.env.AWS_BEDROCK_REGION });
 
-  // Retireve the last ingestion job for the data source
-  // TODO: Update to loop through all data sources to grab the last ingestion job
+  // Retrieve the last ingestion job for the data source
   const command = new ListIngestionJobsCommand({
     knowledgeBaseId: process.env.AWS_BEDROCK_KNOWLEDGE_BASE_ID,
     dataSourceId: process.env.AWS_BEDROCK_DATA_SOURCE_ID,
@@ -173,32 +262,31 @@ async function getDataSource() {
   });
 
   try {
-    let formattedLines = '';
     const response = await client.send(command);
-
     console.log("Last synchronized:", response);
 
     //Check if we have ingestion jobs
     if (response.ingestionJobSummaries && response.ingestionJobSummaries.length > 0) {
-      // Display information for each job
-      response.ingestionJobSummaries.forEach(ingestionJob => {
-        console.log(`Knowledge Base ID: ${ingestionJob.knowledgeBaseId}`);
-        console.log(`Data Source ID: ${ingestionJob.dataSourceId}`);
-        console.log(`Status: ${ingestionJob.status}`);
-        console.log(`Started At: ${ingestionJob.startedAt}`);
-        console.log(`Last Sync Time: ${ingestionJob.updatedAt}`);
-        console.log("--------------------------");
-
-        const formattedDate = formatDate(ingestionJob.updatedAt);
-        formattedLines += `Data Source: ${ingestionJob.dataSourceId}\nKnowledge Base: ${ingestionJob.knowledgeBaseId}\nMessage: ${ingestionJob.description}\nStatus: ${ingestionJob.status}\nLast sync: ${formattedDate}\n\n`;
-      });
+      // Return information about the most recent job
+      const job = response.ingestionJobSummaries[0];
+      return {
+        dataSourceId: job.dataSourceId,
+        knowledgeBaseId: job.knowledgeBaseId,
+        description: job.description,
+        status: job.status,
+        startedAt: job.startedAt,
+        updatedAt: job.updatedAt,
+        rawResponse: job
+      };
     } else {
-      console.log("No data sources found for this knowledge base.");
+      return {
+        status: "NO_JOBS_FOUND",
+        message: "No data sources found for this knowledge base."
+      };
     }
-
-    return formattedLines;
   } catch (error) {
     console.error("Error fetching knowledge base info:", error);
+    return { error: error.message, originalError: error };
   }
 }
 
@@ -213,16 +301,24 @@ async function listDataSources() {
 
     const response = await client.send(command);
     console.log("Data source list response:", response);
-    const formattedResponse = `${response.dataSourceSummaries.map(source => `Data Source: ${source.dataSourceId}\n Name: ${source.name}\n Status: ${source.status}\n Updated At: ${formatDate(source.updatedAt)}\n\n`).join('')}`;
-    return formattedResponse;
+
+    return {
+      dataSources: response.dataSourceSummaries.map(source => ({
+        dataSourceId: source.dataSourceId,
+        name: source.name,
+        status: source.status,
+        updatedAt: source.updatedAt,
+        rawResponse: source
+      })),
+      count: response.dataSourceSummaries.length
+    };
   } catch (error) {
     console.error("Error listing data sources:", error);
-    throw error;
+    return { error: error.message, originalError: error };
   }
 }
 
 // Trigger a manual sync of the data source
-// TODO Set to admins or team leads only to prevent too many triggers
 async function syncDataSource() {
   const client = new BedrockAgentClient({ region: process.env.AWS_BEDROCK_REGION });
 
@@ -235,11 +331,17 @@ async function syncDataSource() {
   try {
     const response = await client.send(command);
     console.log("Sync job started successfully:", response);
-    const formattedResponse = `Data Source Sync Initiated. Data Source: ${response.ingestionJob.dataSourceId}\nKnowledge Base: ${response.ingestionJob.knowledgeBaseId}\nJob ID: ${response.ingestionJob.ingestionJobId}\nStatus: ${response.ingestionJob.status}`;
-    return formattedResponse;
+
+    return {
+      dataSourceId: response.ingestionJob.dataSourceId,
+      knowledgeBaseId: response.ingestionJob.knowledgeBaseId,
+      ingestionJobId: response.ingestionJob.ingestionJobId,
+      status: response.ingestionJob.status,
+      rawResponse: response.ingestionJob
+    };
   } catch (error) {
     console.error("Error starting knowledge base sync:", error);
-    throw error;
+    return { error: error.message, originalError: error };
   }
 }
 
@@ -255,11 +357,18 @@ async function getDataSourceConfig() {
 
     const response = await client.send(command);
     console.log("Data source response:", response);
-    const formattedResponse = `Data Source: ${response.dataSource.name}\nStatus: ${response.dataSource.status}\nConfiguration: Type: ${response.dataSource.dataSourceConfiguration.type}\nCreated At: ${formatDate(response.dataSource.createdAt)}\nUpdated At: ${formatDate(response.dataSource.updatedAt)}`;
-    return formattedResponse;
+
+    return {
+      name: response.dataSource.name,
+      status: response.dataSource.status,
+      configurationType: response.dataSource.dataSourceConfiguration.type,
+      createdAt: response.dataSource.createdAt,
+      updatedAt: response.dataSource.updatedAt,
+      rawResponse: response.dataSource
+    };
   } catch (error) {
     console.error("Error fetching data source configuration:", error);
-    throw error;
+    return { error: error.message, originalError: error };
   }
 }
 
@@ -276,11 +385,19 @@ async function getIngestionJobStatus(jobId) {
 
     const response = await client.send(command);
     console.log("Ingestion job response:", response);
-    const formattedResponse = `Ingestion Job: ${response.ingestionJob.ingestionJobId}\nStatus: ${response.ingestionJob.status}\nStarted At: ${formatDate(response.ingestionJob.startedAt)}\nUpdated At: ${formatDate(response.ingestionJob.updatedAt)}\nStatistics: ${response.ingestionJob.statistics}\nFailure Reasons: ${response.ingestionJob.failureReasons.length > 0 ? response.ingestionJob.failureReasons.join('\n') : 'None'}`;
-    return formattedResponse;
+
+    return {
+      ingestionJobId: response.ingestionJob.ingestionJobId,
+      status: response.ingestionJob.status,
+      startedAt: response.ingestionJob.startedAt,
+      updatedAt: response.ingestionJob.updatedAt,
+      statistics: response.ingestionJob.statistics,
+      failureReasons: response.ingestionJob.failureReasons,
+      rawResponse: response.ingestionJob
+    };
   } catch (error) {
     console.error("Error fetching ingestion job status:", error);
-    throw error;
+    return { error: error.message, originalError: error };
   }
 }
 
@@ -292,5 +409,6 @@ export {
   getDataSourceConfig,
   getAgentStatus,
   listDataSources,
-  getIngestionJobStatus
+  getIngestionJobStatus,
+  checkBedrockAgentHealth
 };

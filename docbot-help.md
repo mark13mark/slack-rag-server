@@ -24,14 +24,15 @@ Ragbot is a Slack bot that helps you interact with your knowledge base and get a
 
 ## Slash Commands
 
-- `ragbot-help` - Show this help message
-- `ragbot-kb-status` - Check the status of the knowledge base
-- `ragbot-sync-datasource` - Trigger a sync of the knowledge base
-- `ragbot-list-datasources` - List all available data sources
-- `ragbot-ds-config` - Get configuration for the data source
-- `ragbot-get-datasource` - Get information about the current data source
-- `ragbot-agent-status` - Check the status of the agent
-- `ragbot-job-status <job_id>` - Check the status of an ingestion job
+- `/ragbot-help` - Show this help message
+- `/ragbot-kb-status` - Check the status of the knowledge base
+- `/ragbot-sync-datasource` - Trigger a sync of the knowledge base
+- `/ragbot-list-datasources` - List all available data sources
+- `/ragbot-ds-config` - Get configuration for the data source
+- `/ragbot-get-datasource` - Get information about the current data source
+- `/ragbot-agent-status` - Check the status of the agent
+- `/ragbot-job-status <job_id>` - Check the status of an ingestion job
+- `/ragbot-health-check` - Check overall health of the Bedrock agent service
 
 
 ## Features

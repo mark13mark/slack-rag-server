@@ -39,23 +39,30 @@ async function processMessage({ message, client, say, logger, text, thread = nul
 async function sendAgentRequest({client, channel, timestamp, inputText, say, attachments, thread, logger, includeTraceback = false}) {
   const hasAttachments = attachments && attachments.length > 0;
 
-  try {
-    // Get response from Bedrock
-    const response = await invokeBedrockAgent({
-      inputText: `${inputText}${hasAttachments ? ' use these files when generating your answer' : ''}`,
-      attachments: hasAttachments ? attachments : null,
-      sessionId: thread || timestamp,
-      includeTraceback
-    });
+  // Get response from Bedrock
+  const response = await invokeBedrockAgent({
+    inputText: `${inputText}${hasAttachments ? ' use these files when generating your answer' : ''}`,
+    attachments: hasAttachments ? attachments : null,
+    sessionId: thread || timestamp,
+    includeTraceback
+  });
 
-    // Post the response in thread
-    addReaction({client, channel, timestamp, name: 'white_check_mark', logger});
-    sendSlackMessage({say, thread_ts: timestamp, text: response, logger});
-  } catch (error) {
+  // Check if the response is an error
+  if (response?.error) {
     // Handle Bedrock agent invocation error
     addReaction({client, channel, timestamp, name: 'x', logger});
-    sendSlackMessage({say, thread_ts: timestamp, text: `Error invoking Bedrock agent: ${error}`, logger});
+    sendSlackMessage({
+      say,
+      thread_ts: timestamp,
+      text: `Error invoking Bedrock agent: ${response.error}`,
+      logger
+    });
+    return;
   }
+
+  // Post the successful response in thread
+  addReaction({client, channel, timestamp, name: 'white_check_mark', logger});
+  sendSlackMessage({say, thread_ts: timestamp, text: response, logger});
 }
 
 // Handle app mentions

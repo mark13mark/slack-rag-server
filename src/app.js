@@ -10,7 +10,8 @@ import {
   handleDsConfig,
   handleAgentStatus,
   handleListDataSources,
-  handleJobStatus
+  handleJobStatus,
+  handleHealthCheck
 } from './handlers/command.js';
 
 // Create a custom ExpressReceiver
@@ -41,7 +42,7 @@ app.event('app_mention', handleAppMention);
 app.message(handleDirectMessage);
 app.message(handleThreadMessage);
 
-// Register command handlers
+// Register slash commands
 app.command('/ragbot-get-datasource', handleGetDataSource);
 app.command('/ragbot-sync-datasource', handleSyncDataSource);
 app.command('/ragbot-help', handleHelp);
@@ -50,6 +51,7 @@ app.command('/ragbot-ds-config', handleDsConfig);
 app.command('/ragbot-agent-status', handleAgentStatus);
 app.command('/ragbot-list-datasources', handleListDataSources);
 app.command('/ragbot-job-status', handleJobStatus);
+app.command('/ragbot-health-check', handleHealthCheck);
 
 // Start the app
 (async () => {
