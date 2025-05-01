@@ -126,13 +126,13 @@ export function handleDirectMessage({ message, client, say, logger }) {
   }
 }
 
-// Handle thread messages with "Hey Docbot" in channels (not DMs)
+// Handle thread messages with "Hey Ragbot" in channels (not DMs)
 export function handleThreadMessage({ message, client, say, logger }) {
   try {
     if (!message.thread_ts ||
       message.channel_type === 'im' ||
       !message.text ||
-      !message.text.toLowerCase().trim().startsWith("hey docbot") ||
+      !message.text.toLowerCase().trim().startsWith("hey ragbot") ||
       message.bot_id ||
       message.subtype) {
       return;
@@ -140,15 +140,15 @@ export function handleThreadMessage({ message, client, say, logger }) {
 
     logInfo(logger, `Processing thread message: ${message.text}`);
 
-    // Extract text after "Hey Docbot"
-    const textAfterHeyDocbot = message.text.slice(message.text.toLowerCase().indexOf("hey docbot") + "hey docbot".length).trim();
+    // Extract text after "Hey Ragbot"
+    const textAfterHeyRagbot = message.text.slice(message.text.toLowerCase().indexOf("hey ragbot") + "hey ragbot".length).trim();
 
     return processMessage({
       message,
       client,
       say,
       logger,
-      text: textAfterHeyDocbot,
+      text: textAfterHeyRagbot,
       thread: message.thread_ts
     });
   } catch (error) {

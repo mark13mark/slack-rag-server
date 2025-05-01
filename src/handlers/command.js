@@ -1,7 +1,6 @@
 import { logInfo, logError } from '../utils/logging.js';
-import { handleError, sendSlackMessage, checkUserRole } from '../utils/slack.js';
 import {
-  getDataSourceMetadata,
+  getDataSource,
   syncDataSource,
   getKnowledgeBaseStatus,
   getDataSourceConfig,
@@ -10,29 +9,29 @@ import {
   getIngestionJobStatus
 } from '../services/bedrock.js';
 
-// Handle /docbot-get-datasource command
+// Handle /ragbot-get-datasource command
 export async function handleGetDataSource({ command, ack, respond, logger }) {
   try {
     await ack();
-    logInfo(logger, `Processing /docbot-get-datasource command`);
+    logInfo(logger, `Processing /ragbot-get-datasource command`);
 
-    const metadata = await getDataSourceMetadata();
+    const response = await getDataSource();
     await respond({
-      text: `Current data source: ${metadata.name}\nStatus: ${metadata.status}\nLast sync: ${metadata.lastSyncTime}`
+      text: response
     });
   } catch (error) {
-    logError(logger, error, 'Error in /docbot-get-datasource');
+    logError(logger, error, 'Error in /ragbot-get-datasource');
     await respond({
       text: `Error getting data source information: ${error}`
     });
   }
 }
 
-// Handle /docbot-sync-datasource command
+// Handle /ragbot-sync-datasource command
 export async function handleSyncDataSource({ command, ack, respond, client, logger }) {
   try {
     await ack();
-    logInfo(logger, `Processing /docbot-sync-datasource command from user ${command.user_id}`);
+    logInfo(logger, `Processing /ragbot-sync-datasource command from user ${command.user_id}`);
 
     // Check if user has the required role
     // const hasRequiredRole = await checkUserRole({
@@ -48,138 +47,137 @@ export async function handleSyncDataSource({ command, ack, respond, client, logg
     //   return;
     // }
 
-    const result = await syncDataSource();
+    const response = await syncDataSource();
     await respond({
-      text: `Sync initiated: ${result.message}\nJob ID: ${result.jobId}`
+      text: response
     });
   } catch (error) {
-    logError(logger, error, 'Error in /docbot-sync-datasource');
+    logError(logger, error, 'Error in /ragbot-sync-datasource');
     await respond({
       text: `Error syncing data source: ${error}`
     });
   }
 }
 
-// Handle /docbot-help command
+// Handle /ragbot-help command
 export async function handleHelp({ command, ack, respond, logger }) {
   try {
     await ack();
-    logInfo(logger, `Processing /docbot-help command`);
+    logInfo(logger, `Processing /ragbot-help command`);
 
     const helpText = `Available commands:
-    /docbot-help - Show this help message
-    /docbot-kb-status - Check the status of the knowledge base
-    /docbot-sync-datasource - Trigger a sync of the knowledge base
-    /docbot-list-datasources - List all available data sources
-    /docbot-ds-config - Get configuration for the data source
-    /docbot-get-datasource - Get information about the current data source
-    /docbot-agent-status - Check the status of the agent
-    /docbot-job-status <job_id> - Check the status of an ingestion job`;
+    /ragbot-help - Show this help message
+    /ragbot-kb-status - Check the status of the knowledge base
+    /ragbot-sync-datasource - Trigger a sync of the knowledge base
+    /ragbot-list-datasources - List all available data sources
+    /ragbot-ds-config - Get configuration for the data source
+    /ragbot-get-datasource - Get information about the current data source
+    /ragbot-agent-status - Check the status of the agent
+    /ragbot-job-status <job_id> - Check the status of an ingestion job`;
 
     await respond({
       text: helpText
     });
   } catch (error) {
-    logError(logger, error, 'Error in /docbot-help');
+    logError(logger, error, 'Error in /ragbot-help');
     await respond({
       text: `Error displaying help: ${error}`
     });
   }
 }
 
-// Handle /docbot-kb-status command
+// Handle /ragbot-kb-status command
 export async function handleKbStatus({ command, ack, respond, logger }) {
   try {
     await ack();
-    logInfo(logger, `Processing /docbot-kb-status command`);
+    logInfo(logger, `Processing /ragbot-kb-status command`);
 
-    const status = await getKnowledgeBaseStatus();
+    const response  = await getKnowledgeBaseStatus();
     await respond({
-      text: `Knowledge Base Status:\n${JSON.stringify(status, null, 2)}`
+      text: `Knowledge Base Status:\n${response}`
     });
   } catch (error) {
-    logError(logger, error, 'Error in /docbot-kb-status');
+    logError(logger, error, 'Error in /ragbot-kb-status');
     await respond({
       text: `Error getting knowledge base status: ${error}`
     });
   }
 }
 
-// Handle /docbot-ds-config command
+// Handle /ragbot-ds-config command
 export async function handleDsConfig({ command, ack, respond, logger }) {
   try {
     await ack();
-    logInfo(logger, `Processing /docbot-ds-config command`);
+    logInfo(logger, `Processing /ragbot-ds-config command`);
 
-    const config = await getDataSourceConfig();
+    const response = await getDataSourceConfig();
     await respond({
-      text: `Data Source Configuration:\n${JSON.stringify(config, null, 2)}`
+      text: `Data Source Configuration:\n${response}`
     });
   } catch (error) {
-    logError(logger, error, 'Error in /docbot-ds-config');
+    logError(logger, error, 'Error in /ragbot-ds-config');
     await respond({
       text: `Error getting data source configuration: ${error}`
     });
   }
 }
 
-// Handle /docbot-agent-status command
+// Handle /ragbot-agent-status command
 export async function handleAgentStatus({ command, ack, respond, logger }) {
   try {
     await ack();
-    logInfo(logger, `Processing /docbot-agent-status command`);
+    logInfo(logger, `Processing /ragbot-agent-status command`);
 
-    const status = await getAgentStatus();
+    const response = await getAgentStatus();
     await respond({
-      text: `Agent Status:\n${JSON.stringify(status, null, 2)}`
+      text: `Agent Status:\n${response}`
     });
   } catch (error) {
-    logError(logger, error, 'Error in /docbot-agent-status');
+    logError(logger, error, 'Error in /ragbot-agent-status');
     await respond({
       text: `Error getting agent status: ${error}`
     });
   }
 }
 
-// Handle /docbot-list-datasources command
+// Handle /ragbot-list-datasources command
 export async function handleListDataSources({ command, ack, respond, logger }) {
   try {
     await ack();
-    logInfo(logger, `Processing /docbot-list-datasources command`);
+    logInfo(logger, `Processing /ragbot-list-datasources command`);
 
-    const dataSources = await listDataSources();
-    const dataSourceList = dataSources.map(ds => `- ${ds.name} (${ds.id})`).join('\n');
+    const response = await listDataSources();
     await respond({
-      text: `Available Data Sources:\n${dataSourceList}`
+      text: `Available Data Sources:\n${response}`
     });
   } catch (error) {
-    logError(logger, error, 'Error in /docbot-list-datasources');
+    logError(logger, error, 'Error in /ragbot-list-datasources');
     await respond({
       text: `Error listing data sources: ${error}`
     });
   }
 }
 
-// Handle /docbot-job-status command
+// Handle /ragbot-job-status command
 export async function handleJobStatus({ command, ack, respond, logger }) {
   try {
     await ack();
-    logInfo(logger, `Processing /docbot-job-status command`);
+    logInfo(logger, `Processing /ragbot-job-status command`);
 
     const jobId = command.text.trim();
     if (!jobId) {
       await respond({
-        text: 'Please provide a job ID. Usage: /docbot-job-status <job_id>'
+        text: 'Please provide a job ID. Usage: /ragbot-job-status <job_id>'
       });
       return;
     }
 
-    const status = await getIngestionJobStatus(jobId);
+    const response = await getIngestionJobStatus(jobId);
     await respond({
-      text: `Job Status:\n${JSON.stringify(status, null, 2)}`
+      text: `Job Status:\n${response}`
     });
   } catch (error) {
-    logError(logger, error, 'Error in /docbot-job-status');
+    logError(logger, error, 'Error in /ragbot-job-status');
     await respond({
       text: `Error getting job status: ${error}`
     });

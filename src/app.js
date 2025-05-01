@@ -42,17 +42,17 @@ app.message(handleDirectMessage);
 app.message(handleThreadMessage);
 
 // Register command handlers
-app.command('/docbot-get-datasource', handleGetDataSource);
-app.command('/docbot-sync-datasource', handleSyncDataSource);
-app.command('/docbot-help', handleHelp);
-app.command('/docbot-kb-status', handleKbStatus);
-app.command('/docbot-ds-config', handleDsConfig);
-app.command('/docbot-agent-status', handleAgentStatus);
-app.command('/docbot-list-datasources', handleListDataSources);
-app.command('/docbot-job-status', handleJobStatus);
+app.command('/ragbot-get-datasource', handleGetDataSource);
+app.command('/ragbot-sync-datasource', handleSyncDataSource);
+app.command('/ragbot-help', handleHelp);
+app.command('/ragbot-kb-status', handleKbStatus);
+app.command('/ragbot-ds-config', handleDsConfig);
+app.command('/ragbot-agent-status', handleAgentStatus);
+app.command('/ragbot-list-datasources', handleListDataSources);
+app.command('/ragbot-job-status', handleJobStatus);
 
 // Start the app
 (async () => {
   await app.start(process.env.PORT || 8082);
-  console.log('⚡️ DocBot is running!');
+  console.log('⚡️ RagBot is running!');
 })();
