@@ -1,8 +1,6 @@
 # Environment variables and secrets
 .env
 
-# Node.js
-node_modules/
 
 # IDE and editor files
 .idea/
