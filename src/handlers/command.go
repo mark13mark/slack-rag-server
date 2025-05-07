@@ -9,9 +9,9 @@ import (
 
 	"github.com/slack-go/slack"
 
-	"slack-rag-server/src-go/services"
-	"slack-rag-server/src-go/types"
-	"slack-rag-server/src-go/utils"
+	"slack-rag-server/src/services"
+	"slack-rag-server/src/types"
+	"slack-rag-server/src/utils"
 )
 
 // CommandHandler handles Slack slash commands

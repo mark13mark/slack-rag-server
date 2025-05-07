@@ -7,9 +7,9 @@ import (
 	"github.com/slack-go/slack"
 	"github.com/slack-go/slack/slackevents"
 
-	"slack-rag-server/src-go/services"
-	"slack-rag-server/src-go/types"
-	"slack-rag-server/src-go/utils"
+	"slack-rag-server/src/services"
+	"slack-rag-server/src/types"
+	"slack-rag-server/src/utils"
 )
 
 // MessageHandler handles Slack message events
@@ -93,6 +93,22 @@ func (h *MessageHandler) HandleThreadMessage(event *slackevents.MessageEvent) {
 
 	// Process the message
 	h.processMessage(event.Channel, event.TimeStamp, event.ThreadTimeStamp, textAfterHeyRagbot, event.User)
+}
+
+// HandleDirectThreadMessage handles thread replies in direct messages that don't need "Hey ragbot" prefix
+func (h *MessageHandler) HandleDirectThreadMessage(event *slackevents.MessageEvent) {
+	// Skip if not applicable
+	if event.ThreadTimeStamp == "" ||
+	   event.ChannelType != "im" ||
+	   event.BotID != "" ||
+	   event.SubType != "" {
+		return
+	}
+
+	utils.LogInfo(fmt.Sprintf("Processing direct thread message: %s", event.Text))
+
+	// Process the message directly without requiring "Hey ragbot" prefix
+	h.processMessage(event.Channel, event.TimeStamp, event.ThreadTimeStamp, event.Text, event.User)
 }
 
 // processMessage processes a message and invokes the Bedrock agent

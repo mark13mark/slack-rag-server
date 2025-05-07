@@ -12,7 +12,7 @@ import (
 	bedrockagentruntime "github.com/aws/aws-sdk-go-v2/service/bedrockagentruntime"
 	bedrockagentruntime_types "github.com/aws/aws-sdk-go-v2/service/bedrockagentruntime/types"
 
-	"slack-rag-server/src-go/types"
+	"slack-rag-server/src/types"
 )
 
 // BedrockService provides methods for interacting with AWS Bedrock
