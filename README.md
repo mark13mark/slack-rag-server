@@ -52,12 +52,12 @@ PORT=8083
 
 2. Build the application:
    ```
-   go build -o ragbot .
+   go build
    ```
 
 3. Run the application:
    ```
-   ./ragbot
+   go run main.go
    ```
 
 ## Slack Integration
@@ -113,9 +113,9 @@ Ensure your bot has the following OAuth scopes:
 
 The bot responds to:
 
-- Direct mentions: `@RagBot how do I ...`
-- Direct messages: Any message sent directly to the bot
-- Thread replies: Messages in threads that start with "Hey Ragbot"
+- Direct mentions in regular channels: `@RagBot how do I ...`
+- Direct messages sent directly to the bot
+- Thread replies: Messages in threads that start with "Hey Ragbot" (threads in the Bot's direct message channel does not need the 'Hey Ragbot' leading a sentence)
 
 ## Architecture
 
@@ -123,13 +123,3 @@ The bot responds to:
 - `handlers/` - Slack event and command handlers
 - `services/` - AWS Bedrock service integration
 - `utils/` - Utility functions for logging, file handling, etc.
-
-## Differences from JavaScript Version
-
-This Go implementation has a few key differences from the original JavaScript version:
-
-1. Uses HTTP-based Event API for handling Slack events and commands
-2. Implements more comprehensive error handling
-3. Uses structured logging
-4. Returns interface{} types that can be different response structures based on the operation
-5. Uses more idiomatic Go patterns for handling Slack events
