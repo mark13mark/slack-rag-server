@@ -19,7 +19,7 @@ This is a Go implementation of a Slack server that provides a conversational int
 - Go 1.20 or higher
 - AWS account with Bedrock access
 - Slack workspace with Bot and App permissions
-- Public endpoint URL for your server (for Slack events)
+- Public endpoint URL for your server (for Slack events) (for local testing you can utilize a ngrok tunnel)
 
 ### Environment Variables
 
