@@ -18,6 +18,21 @@ import (
 )
 
 func main() {
+	// Load environment variables and initialize services
+	api, signingSecret, bedrockService := initializeServices()
+
+	// Initialize handlers
+	messageHandler := handlers.NewMessageHandler(api, bedrockService)
+	commandHandler := handlers.NewCommandHandler(api, bedrockService)
+
+	// Set up HTTP server with endpoints
+	setupHTTPRoutes(signingSecret, messageHandler, commandHandler)
+
+	// Start HTTP server
+	startServer()
+}
+
+func initializeServices() (*slack.Client, string, *services.BedrockService) {
 	// Load environment variables from .env file
 	err := godotenv.Load()
 	if err != nil {
@@ -44,173 +59,30 @@ func main() {
 		log.Fatalf("Failed to initialize Bedrock service: %v", err)
 	}
 
-	// Initialize handlers
-	messageHandler := handlers.NewMessageHandler(api, bedrockService)
-	commandHandler := handlers.NewCommandHandler(api, bedrockService)
+	return api, signingSecret, bedrockService
+}
 
-	// Set up HTTP server with endpoints for Slack events and slash commands
-
+func setupHTTPRoutes(signingSecret string, messageHandler *handlers.MessageHandler, commandHandler *handlers.CommandHandler) {
 	// Health check endpoint
-	http.HandleFunc("/health-check", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("Health check passed"))
-	})
+	http.HandleFunc("/health-check", healthCheckHandler)
 
 	// Slack events endpoint
 	http.HandleFunc("/slack/events", func(w http.ResponseWriter, r *http.Request) {
-		// Read the request body
-		body, err := io.ReadAll(r.Body)
-		if err != nil {
-			log.Printf("Error reading request body: %v", err)
-			w.WriteHeader(http.StatusBadRequest)
-			return
-		}
-
-		// Log the body for debugging
-		bodyString := string(body)
-		if len(bodyString) > 0 {
-			previewLength := len(bodyString)
-			if previewLength > 300 {
-				previewLength = 300
-			}
-			log.Printf("Received event. Body preview: %s", bodyString[:previewLength])
-		}
-
-		// Check if this is actually a form-encoded request (slash command) that was sent to the wrong endpoint
-		contentType := r.Header.Get("Content-Type")
-		if contentType == "application/x-www-form-urlencoded" || strings.Contains(bodyString, "command=") {
-			log.Printf("Received form-encoded request to /slack/events, redirecting to command handler")
-
-			// Reset the body for the command handler
-			r.Body = io.NopCloser(bytes.NewReader(body))
-
-			// Call the command handler directly
-			handleSlashCommand(w, r, signingSecret, commandHandler)
-			return
-		}
-
-		// Handle URL verification (required for setting up Events API)
-		// Check if it's a URL verification request before doing signature verification
-		if len(body) > 0 {
-			var requestData map[string]interface{}
-			if err := json.Unmarshal(body, &requestData); err == nil {
-				// If we can parse it as JSON, check if it's a URL verification request
-				if requestType, ok := requestData["type"].(string); ok && requestType == "url_verification" {
-					challenge, ok := requestData["challenge"].(string)
-					if ok {
-						log.Printf("Responding to URL verification challenge")
-						w.Header().Set("Content-Type", "text/plain")
-						w.Write([]byte(challenge))
-						return
-					}
-				}
-			} else {
-				log.Printf("Request body is not valid JSON: %v", err)
-				// This might be a form-encoded request, not a JSON request
-				w.WriteHeader(http.StatusBadRequest)
-				return
-			}
-		}
-
-		// Verify request comes from Slack for non-verification requests
-		sv, err := slack.NewSecretsVerifier(r.Header, signingSecret)
-		if err != nil {
-			log.Printf("Error creating secrets verifier: %v", err)
-			w.WriteHeader(http.StatusBadRequest)
-			return
-		}
-
-		sv.Write(body)
-		if err := sv.Ensure(); err != nil {
-			log.Printf("Invalid request signature: %v", err)
-			w.WriteHeader(http.StatusUnauthorized)
-			return
-		}
-
-		// Parse the raw JSON to access the event property
-		var slackEvent map[string]interface{}
-		if err := json.Unmarshal(body, &slackEvent); err != nil {
-			log.Printf("Error parsing event JSON: %v", err)
-			w.WriteHeader(http.StatusInternalServerError)
-			return
-		}
-
-		// Process events in a separate goroutine to respond to Slack quickly
-		go func() {
-			// Extract the event object from the JSON
-			eventObj, ok := slackEvent["event"].(map[string]interface{})
-			if !ok {
-				log.Printf("No event object found in request")
-				return
-			}
-
-			// Get the event type
-			eventType, ok := eventObj["type"].(string)
-			if !ok {
-				log.Printf("No event type found in event object")
-				return
-			}
-
-			log.Printf("Processing event type: %s", eventType)
-
-			// Handle different event types
-			switch eventType {
-			case "app_mention":
-				// Convert the event back to JSON to parse it into the correct struct
-				eventBytes, err := json.Marshal(eventObj)
-				if err != nil {
-					log.Printf("Error marshalling app_mention event: %v", err)
-					return
-				}
-
-				var appMentionEvent slackevents.AppMentionEvent
-				if err := json.Unmarshal(eventBytes, &appMentionEvent); err != nil {
-					log.Printf("Error parsing app_mention event: %v", err)
-					return
-				}
-
-				log.Printf("Handling app mention from user %s: %s", appMentionEvent.User, appMentionEvent.Text)
-				messageHandler.HandleAppMention(&appMentionEvent)
-
-			case "message":
-				// Convert the event back to JSON to parse it into the correct struct
-				eventBytes, err := json.Marshal(eventObj)
-				if err != nil {
-					log.Printf("Error marshalling message event: %v", err)
-					return
-				}
-
-				var messageEvent slackevents.MessageEvent
-				if err := json.Unmarshal(eventBytes, &messageEvent); err != nil {
-					log.Printf("Error parsing message event: %v", err)
-					return
-				}
-
-				log.Printf("Received message event from user %s in channel %s", messageEvent.User, messageEvent.Channel)
-				if messageEvent.ThreadTimeStamp != "" {
-					if messageEvent.ChannelType == "im" {
-						messageHandler.HandleDirectThreadMessage(&messageEvent)
-					} else {
-						messageHandler.HandleThreadMessage(&messageEvent)
-					}
-				} else if messageEvent.ChannelType == "im" {
-					messageHandler.HandleDirectMessage(&messageEvent)
-				}
-
-			default:
-				log.Printf("Unhandled event type: %s", eventType)
-			}
-		}()
-
-		// Acknowledge receipt of the event
-		w.WriteHeader(http.StatusOK)
+		handleSlackEvents(w, r, signingSecret, messageHandler, commandHandler)
 	})
 
 	// Slash commands endpoint
 	http.HandleFunc("/slack/commands", func(w http.ResponseWriter, r *http.Request) {
 		handleSlashCommand(w, r, signingSecret, commandHandler)
 	})
+}
 
+func healthCheckHandler(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("Health check passed"))
+}
+
+func startServer() {
 	// Get port from environment variable, default to 8083
 	port := os.Getenv("PORT")
 	if port == "" {
@@ -223,6 +95,171 @@ func main() {
 
 	if err := http.ListenAndServe(":"+port, nil); err != nil {
 		log.Fatalf("Error starting HTTP server: %v", err)
+	}
+}
+
+func handleSlackEvents(w http.ResponseWriter, r *http.Request, signingSecret string, messageHandler *handlers.MessageHandler, commandHandler *handlers.CommandHandler) {
+	// Read the request body
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		log.Printf("Error reading request body: %v", err)
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	// Log the body for debugging
+	bodyString := string(body)
+	if len(bodyString) > 0 {
+		previewLength := len(bodyString)
+		if previewLength > 300 {
+			previewLength = 300
+		}
+		log.Printf("Received event. Body preview: %s", bodyString[:previewLength])
+	}
+
+	// Check if this is actually a form-encoded request (slash command) that was sent to the wrong endpoint
+	contentType := r.Header.Get("Content-Type")
+	if contentType == "application/x-www-form-urlencoded" || strings.Contains(bodyString, "command=") {
+		log.Printf("Received form-encoded request to /slack/events, redirecting to command handler")
+
+		// Reset the body for the command handler
+		r.Body = io.NopCloser(bytes.NewReader(body))
+
+		// Call the command handler directly
+		handleSlashCommand(w, r, signingSecret, commandHandler)
+		return
+	}
+
+	if isURLVerificationRequest(w, body) {
+		return
+	}
+
+	// Verify request comes from Slack for non-verification requests
+	if !verifySlackRequest(w, r, body, signingSecret) {
+		return
+	}
+
+	// Process events in a separate goroutine to respond to Slack quickly
+	go processSlackEvent(body, messageHandler)
+
+	// Acknowledge receipt of the event
+	w.WriteHeader(http.StatusOK)
+}
+
+func isURLVerificationRequest(w http.ResponseWriter, body []byte) bool {
+	if len(body) > 0 {
+		var requestData map[string]interface{}
+		if err := json.Unmarshal(body, &requestData); err == nil {
+			// If we can parse it as JSON, check if it's a URL verification request
+			if requestType, ok := requestData["type"].(string); ok && requestType == "url_verification" {
+				challenge, ok := requestData["challenge"].(string)
+				if ok {
+					log.Printf("Responding to URL verification challenge")
+					w.Header().Set("Content-Type", "text/plain")
+					w.Write([]byte(challenge))
+					return true
+				}
+			}
+		} else {
+			log.Printf("Request body is not valid JSON: %v", err)
+		}
+	}
+	return false
+}
+
+func verifySlackRequest(w http.ResponseWriter, r *http.Request, body []byte, signingSecret string) bool {
+	sv, err := slack.NewSecretsVerifier(r.Header, signingSecret)
+	if err != nil {
+		log.Printf("Error creating secrets verifier: %v", err)
+		w.WriteHeader(http.StatusBadRequest)
+		return false
+	}
+
+	sv.Write(body)
+	if err := sv.Ensure(); err != nil {
+		log.Printf("Invalid request signature: %v", err)
+		w.WriteHeader(http.StatusUnauthorized)
+		return false
+	}
+	return true
+}
+
+func processSlackEvent(body []byte, messageHandler *handlers.MessageHandler) {
+	// Parse the raw JSON to access the event property
+	var slackEvent map[string]interface{}
+	if err := json.Unmarshal(body, &slackEvent); err != nil {
+		log.Printf("Error parsing event JSON: %v", err)
+		return
+	}
+
+	// Extract the event object from the JSON
+	eventObj, ok := slackEvent["event"].(map[string]interface{})
+	if !ok {
+		log.Printf("No event object found in request")
+		return
+	}
+
+	// Get the event type
+	eventType, ok := eventObj["type"].(string)
+	if !ok {
+		log.Printf("No event type found in event object")
+		return
+	}
+
+	log.Printf("Processing event type: %s", eventType)
+
+	// Handle different event types
+	switch eventType {
+	case "app_mention":
+		handleAppMentionEvent(eventObj, messageHandler)
+	case "message":
+		handleMessageEvent(eventObj, messageHandler)
+	default:
+		log.Printf("Unhandled event type: %s", eventType)
+	}
+}
+
+func handleAppMentionEvent(eventObj map[string]interface{}, messageHandler *handlers.MessageHandler) {
+	// Convert the event back to JSON to parse it into the correct struct
+	eventBytes, err := json.Marshal(eventObj)
+	if err != nil {
+		log.Printf("Error marshalling app_mention event: %v", err)
+		return
+	}
+
+	var appMentionEvent slackevents.AppMentionEvent
+	if err := json.Unmarshal(eventBytes, &appMentionEvent); err != nil {
+		log.Printf("Error parsing app_mention event: %v", err)
+		return
+	}
+
+	log.Printf("Handling app mention from user %s: %s", appMentionEvent.User, appMentionEvent.Text)
+	messageHandler.HandleAppMention(&appMentionEvent)
+}
+
+func handleMessageEvent(eventObj map[string]interface{}, messageHandler *handlers.MessageHandler) {
+	// Convert the event back to JSON to parse it into the correct struct
+	eventBytes, err := json.Marshal(eventObj)
+	if err != nil {
+		log.Printf("Error marshalling message event: %v", err)
+		return
+	}
+
+	var messageEvent slackevents.MessageEvent
+	if err := json.Unmarshal(eventBytes, &messageEvent); err != nil {
+		log.Printf("Error parsing message event: %v", err)
+		return
+	}
+
+	log.Printf("Received message event from user %s in channel %s", messageEvent.User, messageEvent.Channel)
+	if messageEvent.ThreadTimeStamp != "" {
+		if messageEvent.ChannelType == "im" {
+			messageHandler.HandleDirectThreadMessage(&messageEvent)
+		} else {
+			messageHandler.HandleThreadMessage(&messageEvent)
+		}
+	} else if messageEvent.ChannelType == "im" {
+		messageHandler.HandleDirectMessage(&messageEvent)
 	}
 }
 
@@ -300,32 +337,34 @@ func handleSlashCommand(w http.ResponseWriter, r *http.Request, signingSecret st
 	log.Printf("Processing slash command: %s from user %s", s.Command, s.UserID)
 
 	// Process commands in a separate goroutine
-	go func() {
-		switch s.Command {
-		case "/ragbot-get-datasource":
-			commandHandler.HandleGetDataSource(s)
-		case "/ragbot-sync-datasource":
-			commandHandler.HandleSyncDataSource(s)
-		case "/ragbot-help":
-			commandHandler.HandleHelp(s)
-		case "/ragbot-kb-status":
-			commandHandler.HandleKbStatus(s)
-		case "/ragbot-ds-config":
-			commandHandler.HandleDsConfig(s)
-		case "/ragbot-agent-status":
-			commandHandler.HandleAgentStatus(s)
-		case "/ragbot-list-datasources":
-			commandHandler.HandleListDataSources(s)
-		case "/ragbot-job-status":
-			commandHandler.HandleJobStatus(s)
-		case "/ragbot-health-check":
-			commandHandler.HandleHealthCheck(s)
-		default:
-			log.Printf("Unknown command: %s", s.Command)
-		}
-	}()
+	go processSlashCommand(s, commandHandler)
 
 	// Acknowledge receipt of the command to Slack (required within 3 seconds)
 	// Don't send any content since we'll use the response_url to send the actual response
 	w.WriteHeader(http.StatusOK)
+}
+
+func processSlashCommand(s slack.SlashCommand, commandHandler *handlers.CommandHandler) {
+	switch s.Command {
+	case "/ragbot-get-datasource":
+		commandHandler.HandleGetDataSource(s)
+	case "/ragbot-sync-datasource":
+		commandHandler.HandleSyncDataSource(s)
+	case "/ragbot-help":
+		commandHandler.HandleHelp(s)
+	case "/ragbot-kb-status":
+		commandHandler.HandleKbStatus(s)
+	case "/ragbot-ds-config":
+		commandHandler.HandleDsConfig(s)
+	case "/ragbot-agent-status":
+		commandHandler.HandleAgentStatus(s)
+	case "/ragbot-list-datasources":
+		commandHandler.HandleListDataSources(s)
+	case "/ragbot-job-status":
+		commandHandler.HandleJobStatus(s)
+	case "/ragbot-health-check":
+		commandHandler.HandleHealthCheck(s)
+	default:
+		log.Printf("Unknown command: %s", s.Command)
+	}
 }

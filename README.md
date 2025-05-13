@@ -1,6 +1,8 @@
 # AWS Bedrock Slack RAG Server (Go Implementation)
 
-This is a Go implementation of the AWS Bedrock Slack RAG Server that integrates with Slack to provide a conversational interface to AWS Bedrock Agents.
+AWS Bedrock Slack RAG Server
+
+This is a Go implementation of a Slack server that provides a conversational interface between a Slack bot and AWS Bedrock Agents.
 
 ## Features
 
@@ -123,3 +125,55 @@ The bot responds to:
 - `handlers/` - Slack event and command handlers
 - `services/` - AWS Bedrock service integration
 - `utils/` - Utility functions for logging, file handling, etc.
+
+## Docker Setup
+
+### Prerequisites
+- Docker
+- Docker Compose
+
+### Running with Docker Compose
+
+1. Create a `.env` file in the root directory with your configuration:
+   ```
+   # Slack Configuration
+   SLACK_BOT_TOKEN=xoxb-your-bot-token
+   SLACK_SIGNING_SECRET=your-signing-secret
+
+   # Server Configuration
+   PORT=8083
+
+   # AWS Configuration for Bedrock service
+   AWS_REGION=us-east-1
+   # AWS_ACCESS_KEY_ID=your-access-key-id
+   # AWS_SECRET_ACCESS_KEY=your-secret-access-key
+   ```
+
+2. Build and start the container:
+   ```bash
+   docker-compose up -d
+   ```
+
+3. Check the logs:
+   ```bash
+   docker-compose logs -f
+   ```
+
+4. Stop the container:
+   ```bash
+   docker-compose down
+   ```
+
+### Building and Running with Docker
+
+If you prefer to use Docker directly:
+
+1. Build the Docker image:
+   ```bash
+   docker build -t slack-rag-server .
+   ```
+
+2. Run the container:
+   ```bash
+   docker run -p 8083:8083 --env-file .env -d slack-rag-server
+   ```

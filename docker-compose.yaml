@@ -1,0 +1,21 @@
+version: '3.8'
+
+services:
+  slack-rag-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8083:8083"
+    environment:
+      - PORT=8083
+      # You can set environment variables here, or use the .env file
+      # - SLACK_BOT_TOKEN=your-slack-bot-token
+      # - SLACK_SIGNING_SECRET=your-slack-signing-secret
+    volumes:
+      # Mount the .env file from the host to the container
+      - ./.env:/app/.env:ro
+    restart: unless-stopped
+    # For AWS credentials, either set environment variables or mount ~/.aws if using AWS CLI configuration
+    # volumes:
+    #   - ~/.aws:/root/.aws:ro
